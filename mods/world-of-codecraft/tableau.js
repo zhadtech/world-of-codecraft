@@ -13,6 +13,7 @@ import { district, clip, heroOf } from "./kit.js";
 import { gradient } from "./kit.js";
 import { t } from "./i18n.js";
 import { DEMO_SPACES, DEMO_AGENTS } from "./demo.js";
+import { mover, GEO } from "./mover.js";
 import { P, TITRE, frame, frameT, bar, pic, txt, title, button, gem, mark, banner, portrait, well } from "./ui.js";
 
 const ORDER = ["blocked", "done", "working", "idle"];
@@ -98,7 +99,7 @@ export default class Tableau {
     const sessions = list.reduce((n, sp) => n + sp.tabs.reduce((m, t) => m + (t.panes || 0), 0), 0);
     const T = frameT("cadre");
     const add = (id, label, tip, fn) => button(id, [pic("ic-plus", 11, 11), txt(label, 15, P.cream, 800)], fn, { tip }).flex_1();
-    return div().id("tableau").size_full().relative().bg(P.leather)
+    return div().id("tableau").on_size_change((s) => { GEO.size.districts = { w: s.width, h: s.height }; }).size_full().relative().bg(P.leather)
       .child(gradient("#2b1e16", "#100b0a", 165))
       .child(v_flex().absolute().left(T).right(T).top(T).bottom(T)
         .child(this.heading(t("districts"), t("sessions", sessions)))
@@ -107,6 +108,7 @@ export default class Tableau {
           .child(h_flex().mx(2).mt(10).gap(6)
             .child(add("nouvelle-quete", t("newQuest"), t("newQuestTip"), () => run("tab.new", {})))
             .child(add("nouveau-quartier", t("newDistrict"), t("newDistrictTip"), () => run("space.new", {}))))))
-      .children(frame("cadre"));
+      .children(frame("cadre"))
+      .child(mover(this, "districts"));
   }
 }

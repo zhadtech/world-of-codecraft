@@ -22,7 +22,10 @@ in Valbrume, a village drawn in isometric pixel art, built around one big termin
 - **An immersive mode** (header button or ctrl-shift-i), in the same layout, swaps the village and the
   terminal: the village fills the window at the same resolution, on a map three times taller with a forest to the north and fields and
   groves to the south, and you drag it to look around.
-- **Spaces are districts and tabs are quests,** on the left, with heraldic banners.
+- **Spaces are districts and tabs are quests,** with heraldic banners.
+- **Arrange it your way.** Districts, the village, and the map with the selected unit are three
+  panels. Drag a panel's `∷` grip to the left, the right or the bottom, in any order, or click the
+  grip for buttons (Reset restores the original). Drag the edges between panels to resize them.
 - **Days and nights** follow your clock, with lit windows, a glowing forge and smoking
   chimneys.
 - **French or English,** picked from your system language.
@@ -44,7 +47,7 @@ herdr-app do layout.switch '{"name":"World-of-Codecraft"}'
 
 Then merge `mods/world-of-codecraft/KEYS.json` into your `keys.json`: `ctrl-shift-i`
 switches the immersive mode, `ctrl-shift-j` toggles the village and `ctrl-shift-b` toggles
-the left column. Run `tools/install.sh`
+the left column (when a panel is there). Run `tools/install.sh`
 again after a `git pull`. It installs real files, not symlinks: Herdr loads images and
 reloads mods only from real files inside its home.
 

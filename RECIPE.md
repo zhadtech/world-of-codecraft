@@ -93,8 +93,8 @@ the clock. The art is original: it imitates no existing game.
   it starts with `fr`. Shared with every copy of the mod through the store key `wocc.lang`.
   A block's `props.lang` (`"fr"` / `"en"`) forces it.
 - **Keys** (`layout:World-of-Codecraft`): ctrl-shift-i switches the immersive mode
-  (`world-of-codecraft.mode`), ctrl-shift-j toggles the bottom village, and ctrl-shift-b
-  toggles the left column (`gauche`).
+  (`world-of-codecraft.mode`), ctrl-shift-j toggles the village, and ctrl-shift-b
+  toggles the left column (`zone-left`, only there while a panel is in it).
 
 ## Activity scenes and village life
 
@@ -130,16 +130,34 @@ the clock. The art is original: it imitates no existing game.
   heroes stand on still frames, no walking, no scenes, enemies, village life or smoke, and
   no activity polling (about 10 % of a core instead of 27 % on an M2 Pro).
 
+## Movable panels
+
+- **Three panels:** Districts (`tableau`), Map + Unit (`commande`) and the village (`place`). Each sits
+  in the left column (`zone-left`), the right column (`zone-right`) or the bottom row (`zone-bottom`),
+  in any order. An empty area is left out of the tree. By default Districts is on the left, and Map +
+  Unit and the village are along the bottom. In each area one panel takes the leftover room (the
+  village first, then Districts, then Map + Unit). Edges between panels drag to resize; sizes survive moves.
+- **The grip:** `∷` in each panel's top right corner. Dragged, its label shows the target and position;
+  releasing over the terminals cancels. Clicked, it shows Left, Right, Bottom, reorder arrows and Reset.
+  Hidden in Immersion.
+- **Commands** (read by the header): `world-of-codecraft.<panel>-<left|right|bottom|earlier|later>`
+  (panels `districts`, `map`, `town`) and `world-of-codecraft.panels-reset`.
+- **How:** `arrange.js` (pure functions) builds the layout tree for an arrangement, and `mover.js` sends
+  it with `herdr-app do layout.set`. The shown tree is the source of truth; the store keeps the
+  arrangement (`wocc.arr`) for leaving Immersion, and the sizes (`wocc.sizes`).
+- **Narrow or short slots:** the village always pans on both axes when it doesn't fit. The Map + Unit
+  panel hides the map under 340 px of height, and also the toggle and heading under 260 px.
+
 ## Immersive mode
 
-The same layout, other blocks shown: the left column (`gauche`) keeps the board on top and the command
-panel below (its own block, role `commande`, 400 px, hidden in Workshop); on the right the village and the
-terminal swap places: a second village block (`place-immersion`, weight 1, `props.immersion: true`, no panel
-inside, hidden in Workshop) fills the space above, the framed terminal (`arene`) shrinks to 400 px below
-(resizable), and the bottom village (`place`) is hidden. The header's « Immersion » / « Atelier » (Workshop)
-button and ctrl-shift-i (`world-of-codecraft.mode`, read by the header) run `layout.show` / `layout.hide` /
-`layout.resize`: layout clicks, so the mode survives restarts. Only the shown village writes the chronicle;
-a hidden one keeps no timers. The layout sets no terminal text size, so Herdr's settings choose it.
+The same layout, rebuilt: a second village block (`place-immersion`, weight 1, `props.immersion: true`,
+hidden in Workshop) fills the centre, the framed terminal (`arene`) shrinks to 400 px below it
+(resizable), the village panel (`place`) leaves the tree, and the other bottom panels move under the left
+column. Leaving restores the arrangement; sizes dragged during Immersion aren't kept. The header's
+« Immersion » / « Atelier » (Workshop) button and ctrl-shift-i (`world-of-codecraft.mode`) switch it, and
+the mode survives restarts. Only the shown village writes the chronicle (shared in the store, key
+`wocc.chronicle`); a hidden one keeps no timers. The layout sets no terminal text size, so Herdr's
+settings choose it.
 - **No zoom: more map, baked by the village's own engine.** The direction A art pipeline (procedural voxel
   models, GI lighting, tiled procedural ground, `compose3` compositor) lives in `tools/village-art/`
   (rebuilt from the session transcripts on 08/11/2026 and verified pixel-identical to the approved bake).
@@ -157,24 +175,27 @@ a hidden one keeps no timers. The layout sets no terminal text size, so Herdr's 
 
 ## Built from
 
-- **Layout tree:** a root column made of:
+- **Layout tree** (as shipped): a root column made of:
   - `fronton` (block, 48 px);
-  - `bourg` (row, 6 px padding and gap), holding:
-    - `gauche` (column, 262 px, min 200, max 420): `tableau` (weight 1) and `commande`
-      (400 px, hidden outside the immersive mode);
-    - `droite` (column): `place-immersion` (weight 1, `props.immersion`, hidden outside the
-      immersive mode) and `arene` (weight 1, 400 px in the immersive mode; a column of four
-      `rail` blocks around the `main` tab block);
-  - `place` (block, 400 px, hidden in the immersive mode).
+  - `corps` (column, resizable), holding:
+    - `bourg` (row, 6 px padding and gap, resizable), holding:
+      - `zone-left` (column, 262 px): `tableau`;
+      - `droite` (column): `place-immersion` (weight 1, `props.immersion`, hidden outside the
+        immersive mode) and `arene` (weight 1, 400 px in the immersive mode; a column of four
+        `rail` blocks around the `main` tab block);
+    - `zone-bottom` (row, 400 px): `commande` (262 px) and `place` (weight 1).
 
+  Moving panels adds or removes `zone-left`, `zone-right` and `zone-bottom` and moves their blocks.
   The root has `titlebar: none`, background `#120c0e`, `font` JetBrains Mono, `ui_font`
   Alegreya Sans, no `font_size`, and a PNG `preview`. There is one layout file; the
-  immersive mode is a set of layout clicks on it.
+  immersive mode is a rebuild of its tree.
 - **The mod** is `mods/world-of-codecraft`, one mod with roles picked by `props.role`:
   - `fronton.js`: the top bar and the immersive-mode switch
   - `tableau.js`: the districts column
   - `rail`: the gilded moulding
-  - `place.js`: the world and the command panel, with `commande.js`
+  - `place.js`: the world
+  - `commande.js`: the map and selected-unit panel
+  - `arrange.js` and `mover.js`: where the panels sit, and the grip that moves them
   - `pane.js`: the pane header
 
   The shared code is:
@@ -190,14 +211,16 @@ a hidden one keeps no timers. The layout sets no terminal text size, so Herdr's 
 - **Herdr API:**
   - data: `spaces()`, `agents()`, `panes()`, `focused()` and the store;
   - commands: `agent.focus`, `agent.next`, `pane.focus`, `space.select`, `tab.select`,
-    `tab.new`, `space.new`, `pane.split`, `pane.zoom` and `pane.close`.
+    `tab.new`, `space.new`, `pane.split`, `pane.zoom` and `pane.close`; `layout.set` through the
+    command line (`run()` refuses arguments nested more than 16 levels, as this tree is).
 - **Timers:** one shared 100 ms timer runs only while a visible unit animates or walks,
   and stops when its village block (`place` or `place-immersion`) is hidden. The clock ticks every 30 s; the sky and quotas
   update every 60 s.
 - **Files read and programs run:** the activity files in `~/.local/state/world-of-codecraft/`
   (if the integrations are installed) and `~/.local/state/claude-duo/quota-{A,B}.json`
   (cduo, if present). Once per start it runs `sh` to read the system language
-  (`defaults read -g AppleLanguages`, `$LANG`). No network calls.
+  (`defaults read -g AppleLanguages`, `$LANG`). Each panel move or Immersion switch runs
+  `herdr-app do layout.set`. No network calls.
 - **Repo tooling** (`tools/`, not installed): `install.sh` copies the mod, layout and theme
   into the Herdr home (`--integrations` links the hook and plugin); `sync_creatures.py`,
   `sync_heroes.py`, `bake_world.py`, `ui.py` rebuild the art from `tools/sources/`.
@@ -236,6 +259,7 @@ a hidden one keeps no timers. The layout sets no terminal text size, so Herdr's 
 
 ## Done when
 
+- All three panels can sit on one side, in any order, and the map and selected unit stay visible.
 - `herdr-app check mods/world-of-codecraft` passes and `herdr-app status` shows no
   errors.
 - Each agent appears at its class building. Blocked shows `!` and a red ring. Focusing

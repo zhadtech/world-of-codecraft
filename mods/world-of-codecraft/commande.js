@@ -12,7 +12,7 @@ import { t } from "./i18n.js";
 import { P, frame, frameT, bar, pic, txt, title, button, gem, mark, portraitCard, well } from "./ui.js";
 
 const TONE = { blocked: P.blocked, done: P.done, working: P.working, idle: P.idle, garde: P.guard };
-export const MINI_INSET = 38; // the minimap is PANEL - 38 wide (frame 14 x 2 + iron frame 5 x 2)
+export const MINI_INSET = 38; // the minimap is the panel width - 38 wide (frame 14 x 2 + iron frame 5 x 2)
 
 function heading(text) {
   return div().relative().flex_none().h(30).children(bar("bandeau"))
@@ -48,15 +48,15 @@ function toggle(anim) {
     anim.toggle, { tip: anim.on ? t("animOnTip") : t("animOffTip") }).w_full();
 }
 
-export function commandPanel(width, minimap, sel, anim = null) {
+export function commandPanel(width, minimap, sel, anim = null, short = false, tiny = false) {
   const T = frameT("cadre");
   return div().id("commande").relative().flex_none().w(width).h_full().bg(P.leather)
       .child(gradient("#2b1e16", "#100b0a", 165))
     .child(v_flex().absolute().left(T).right(T).top(T).bottom(T).gap(6)
-      .child(heading(t("map")))
-      .child(div().relative().flex_none().self_start().p(5).bg("#0c0a0e").child(minimap).children(frame("fin")))
-      .when(Boolean(anim), (el) => el.child(toggle(anim)))
-      .child(heading(t("selected")))
+      .when(!short, (el) => el.child(heading(t("map")))
+        .child(div().relative().flex_none().self_start().p(5).bg("#0c0a0e").child(minimap).children(frame("fin"))))
+      .when(Boolean(anim) && !tiny, (el) => el.child(toggle(anim)))
+      .when(!tiny, (el) => el.child(heading(t("selected"))))
       .child(card(sel)))
     .children(frame("cadre"));
 }
@@ -64,12 +64,14 @@ export function commandPanel(width, minimap, sel, anim = null) {
 // ------------------------------------------------------------------ the panel as its own block
 
 import { image } from "gpui-kit";
-import { agents, focused, shared, setShared, props } from "herdr";
+import { agents, focused, shared, setShared, props, settings } from "herdr";
 import { heroOf, guards, C as KC } from "./kit.js";
 import { DEMO_SELECTED } from "./demo.js";
 import { WORLD } from "./monde-data.js";
+import { mover, GEO } from "./mover.js";
 
 const MONDE = "mods/world-of-codecraft/art/monde";
+const MAX_W = 420; // a wide slot: the panel stays this wide, centred
 const DOT = { blocked: KC.quest, done: KC.gold, working: "#7dff6a", idle: "#cfc8da", garde: "#9aa4b1" };
 
 /** Role "commande" (immersive layout): the command panel beside the terminal, under the board. The village
@@ -80,7 +82,7 @@ export class Commande {
 
   minimap() {
     const v = shared("wocc.view") ?? { cam: 0, vw: 1200, dots: [] };
-    const mw = this.w - MINI_INSET, k = mw / WORLD.w, mh = Math.round(WORLD.h * k);
+    const mw = Math.min(this.w, MAX_W) - MINI_INSET, k = mw / WORLD.w, mh = Math.round(WORLD.h * k);
     return div().id("minicarte").relative().w(mw).h(mh).flex_none().cursor_pointer()
       .tooltip(t("mapTip"))
       .on_mouse_down("left", (e, cx) => {
@@ -106,8 +108,14 @@ export class Commande {
 
   render() {
     const on = shared("wocc.anim") !== false;
-    return div().id("commande-bloc").size_full()
-      .on_size_change((s, cx) => { if (Math.abs(s.width - this.w) > 2) { this.w = s.width; cx.notify(); } })
-      .child(commandPanel(this.w, this.minimap(), this.selected(), { on, toggle: () => setShared("wocc.anim", !on) }));
+    const h = this.h ?? 400;
+    return div().id("commande-bloc").size_full().relative().flex().justify_center().bg(P.leather)
+      .on_size_change((s, cx) => {
+        GEO.size.map = { w: s.width, h: s.height };
+        const z = Number(settings()?.zoom) || 1, w = s.width / z, hh = s.height / z; // screen px -> zoom-1 px
+        if (Math.abs(w - this.w) > 2 || Math.abs(hh - (this.h ?? 0)) > 2) { this.w = w; this.h = hh; cx.notify(); }
+      })
+      .child(commandPanel(Math.min(this.w, MAX_W), this.minimap(), this.selected(), { on, toggle: () => setShared("wocc.anim", !on) }, h < 340, h < 260))
+      .child(mover(this, "map"));
   }
 }

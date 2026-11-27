@@ -14,10 +14,15 @@ import Place from "./place.js";
 import PaneHead from "./pane.js";
 import { Commande } from "./commande.js";
 import { rail } from "./ui.js";
+import { GEO } from "./mover.js";
 
 class Rail {
   init(pr) { this.side = pr.side ?? "top"; }
-  render() { return rail(this.side); }
+  render() {
+    if (this.side !== "left") return rail(this.side);
+    // its height tells the panel mover where the bottom row starts
+    return div().id("rail-left").size_full().on_size_change((s) => { GEO.railH = s.height; }).child(rail(this.side));
+  }
 }
 
 const ROLES = { fronton: Fronton, tableau: Tableau, place: Place, pane: PaneHead, rail: Rail, commande: Commande };
