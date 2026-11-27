@@ -1,5 +1,5 @@
 // La place (bottom strip): Valbrume seen from above, isometric pixel art (direction A, v3).
-// Left, the RTS-style command panel: minimap (click to move the camera) and the selected unit.
+// The command panel (minimap and selected unit) is its own block, commande.js; mover.js places both.
 // Right, the village: the static world (ground, buildings, props, shadows, night lights) is baked
 // by tools/bake_world.py into a few big images, day and night, exactly as the approved mocks;
 // only the units, their markers, front cut-outs (depth), glows and smoke are live.
@@ -13,7 +13,7 @@
 
 import { div, image } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { agents, spaces, run, setAgentOrder, props, focused, layout, shared, setShared, settings } from "herdr";
+import { agents, spaces, run, setAgentOrder, props, focused, shared, setShared, settings } from "herdr";
 import { UI, C, hash, clip, heroOf, heroTitle, guards, QUEST, sky, stop } from "./kit.js";
 import { WORLD, TILES, FRONTS } from "./monde-data.js";
 import { HEROES } from "./heros-data.js";
@@ -22,12 +22,12 @@ import { t as tr, detectLang } from "./i18n.js";
 import { Activites } from "./activite.js";
 import { Ambiance, behind } from "./ambiance.js";
 import { DEMO_LOG } from "./demo.js";
-import { commandPanel, MINI_INSET } from "./commande.js";
 import { EXT } from "./terre-data.js";
+import { mover, slotShown, arrangement, GEO } from "./mover.js";
+import { zoneOf } from "./arrange.js";
 
 const ART = "mods/world-of-codecraft/art";
 const MONDE = `${ART}/monde`;
-const PANEL = 262; // command panel width (lines up with the quest board)
 const RANK = { blocked: 0, done: 1, working: 2, idle: 3, garde: 4 };
 const LOG_KEY = "wocc.chronicle";
 const TICK = 100; // ms: the shared frame timer (10 fps)
@@ -95,20 +95,28 @@ export default class Place {
     this.act = new Activites(); // what each hero does while working (Claude Code hook)
     this.amb = new Ambiance(); // village life: walkers, animals, treasury, fair (only when animated)
     this.live = true; // the « Animations » toggle (shared wocc.anim): off = still images, no walk, no scenes
-    try { this.log = JSON.parse(localStorage.getItem(LOG_KEY) ?? "[]"); } catch { this.log = []; }
+    try { this.log = this.readLog(); } catch { this.log = []; }
     cx.timer.every(60_000, (cx) => { this.now = new Date(); cx.notify(); });
   }
 
   // ---------------------------------------------------------------- chronicle
 
+  readLog() {
+    const kept = shared(LOG_KEY);
+    return Array.isArray(kept) ? [...kept] : JSON.parse(localStorage.getItem(LOG_KEY) ?? "[]");
+  }
+
   say(text, kind, address) {
-    try { this.log = JSON.parse(localStorage.getItem(LOG_KEY) ?? "[]"); } catch {} // the other village may have written
+    try { this.log = this.readLog(); } catch {} // the other village may have written
     this.log.unshift({ at: Date.now(), text, kind, address });
     this.log = this.log.slice(0, 40);
-    try { localStorage.setItem(LOG_KEY, JSON.stringify(this.log)); } catch {}
+    setShared(LOG_KEY, this.log);
   }
 
   watch(list) {
+    // the other village wrote the chronicle since we last did: our remembered states are stale
+    const me = props()?.immersion ? "immersion" : "place";
+    if (GEO.watcher !== me) { GEO.watcher = me; this.prev = null; }
     const now = new Map(list.map((a) => [a.address, a]));
     if (this.prev) {
       for (const a of list) {
@@ -298,8 +306,7 @@ export default class Place {
 
   hidden() {
     const id = props()?.immersion ? "place-immersion" : "place"; // two villages in the layout, one shown
-    const find = (n) => (!n || typeof n !== "object" ? null : n.id === id ? n : (n.children ?? []).map(find).find(Boolean) ?? null);
-    try { return Boolean(find(layout())?.hidden); } catch { return false; }
+    return !slotShown(id);
   }
 
   // ---------------------------------------------------------------- world parts
@@ -348,8 +355,8 @@ export default class Place {
 
   // ---------------------------------------------------------------- the panel
 
-  /** Immersive layout: the command panel is another block (commande.js, role "commande"). Tell it where the
-   *  camera and the units are (store key wocc.view, only when it changes, at most every 300 ms) and obey its
+  /** The command panel is its own block (commande.js, role "commande"). Tell it where the camera and
+   *  the units are (store key wocc.view, only when it changes, at most every 300 ms) and obey its
    *  minimap clicks (wocc.goto). */
   bridge(units, vw) {
     const g = shared("wocc.goto");
@@ -365,32 +372,11 @@ export default class Place {
     if (key !== this.viewKey && now - (this.viewAt ?? 0) > 300) { this.viewKey = key; this.viewAt = now; setShared("wocc.view", view); }
   }
 
-  minimap(units, vw) {
-    const mw = PANEL - MINI_INSET, k = mw / WORLD.w, mh = Math.round(WORLD.h * k);
-    const col = { blocked: C.quest, done: C.gold, working: "#7dff6a", idle: "#cfc8da", garde: "#9aa4b1" };
-    const view = (vw / WORLD.w) * mw;
-    const vx = (this.cam(vw) / WORLD.w) * mw;
-    return div().id("minicarte").relative().w(mw).h(mh).flex_none().cursor_pointer()
-      .tooltip(tr("mapTip"))
-      .on_mouse_down("left", (e, cx) => {
-        const lx = e.local_position?.x;
-        if (typeof lx === "number") { this.camX = (lx / mw) * WORLD.w - vw / 2; this.manual = true; cx.notify(); }
-        cx.stop_propagation();
-      })
-      .child(image(`${MONDE}/minicarte.png`).absolute().left(0).top(0).w(mw).h(mh))
-      .children(units.map((u) => {
-        let d = div().absolute().left(u.x * k - 2).top(u.y * k - 3).size(4).bg(col[u.a.status] ?? "#ffffff").border_1().border_color("#000000");
-        if (u.a.status === "blocked") d = d.when(this.live, (e) => e.loop("opacity", { from: 0.2, to: 1, period: 420 }));
-        return d;
-      }))
-      .child(div().absolute().left(vx).top(0).w(view).h(mh).border_1().border_color("#ffffff"));
-  }
-
   /** Immersive layout: the world y at the top of the view, kept inside the painted bands. */
   camV() {
     const h = this.h ?? WORLD.h, top = -EXT.nord, bottom = WORLD.h + EXT.sud;
     if (h >= bottom - top) return (top + bottom - h) / 2;
-    const c = this.camY ?? (WORLD.h / 2 - 40 - h / 2);
+    const c = this.camY ?? (WORLD.h / 2 - (this.tall ? 40 : 0) - h / 2);
     return Math.max(top, Math.min(bottom - h, c));
   }
 
@@ -402,7 +388,7 @@ export default class Place {
 
   chronicle() {
     const tone = { blocked: C.quest, done: C.gold, working: "#8fd16a", idle: "#cfc8da" };
-    return v_flex().absolute().left(10).top(8).gap(2).children((props()?.demo ? DEMO_LOG : this.log).slice(0, 4).map((e, i) => {
+    return v_flex().absolute().left(10).top(8).gap(2).children((props()?.demo ? DEMO_LOG : this.log).slice(0, this.w < 420 || (this.h ?? WORLD.h) < 260 ? 2 : 4).map((e, i) => {
       const tag = e.text.match(/^\[[^\]]+\]/)?.[0] ?? "";
       const d = new Date(e.at);
       return h_flex().id(`ev-${i}-${e.at}`).gap(5).px(6).h(20).items_center().rounded(2).bg("#0b0810bb").whitespace_nowrap().cursor_pointer()
@@ -456,7 +442,7 @@ export default class Place {
     if (props()?.demo) list = this.demo(); // screenshots: only the demo heroes, none of the person's agents
     else if (this.hidden()) { // the other village keeps the chronicle; start afresh when shown again
       this.prev = null;
-      try { this.log = JSON.parse(localStorage.getItem(LOG_KEY) ?? "[]"); } catch {}
+      try { this.log = this.readLog(); } catch {}
     } else if (shared("wocc.lang") || Date.now() - this.born > 4000) this.watch(list); // chronicle once the language is known
     const order = [...list].sort((a, b) => RANK[a.status] - RANK[b.status] || b.seq - a.seq);
     if (!props()?.demo) setAgentOrder(order.map((a) => a.address));
@@ -467,16 +453,18 @@ export default class Place {
     // the selected unit = the focused agent (or the focused shell)
     const f = focused();
     const sel = units.find((u) => u.a.address === (f?.agent ?? f?.terminal)) ?? units.find((u) => u.a.focused) ?? null;
-    // immersive layout: the command panel is its own block (role "commande"), the village takes the full width
     const imm = Boolean(props()?.immersion);
-    const vw = Math.max(200, this.w - (imm ? 0 : PANEL));
-    if (imm) this.bridge(units, vw);
+    this.tall = imm || zoneOf(arrangement(), "town") !== "bottom";
+    const cropped = this.tall || (this.h ?? WORLD.h) < WORLD.h - 1;
+    if (!cropped) this.camY = null;
+    const vw = Math.max(200, this.w);
+    if (!props()?.demo && !this.hidden()) this.bridge(units, vw);
     if (sel && sel.a.address !== this.lastFocus) {
       this.lastFocus = sel.a.address;
       this.manual = false; // a new selection takes the camera back
       this.camX = sel.x - vw / 2; // glide to the selected unit
-      if (imm) this.camY = sel.y - 60 - (this.h ?? WORLD.h) / 2; // and bring the village back into view
-    } else if (sel?.leg && !this.manual) this.camX = sel.x - vw / 2; // and follow it while it walks
+      if (cropped) this.camY = sel.y - 60 - (this.h ?? WORLD.h) / 2; // and bring the village back into view
+    } else if (sel?.leg && !this.manual) { this.camX = sel.x - vw / 2; if (cropped) this.camY = sel.y - 60 - (this.h ?? WORLD.h) / 2; } // and follow it while it walks
     const camX = this.cam(vw);
 
     // frame animation: visible units with frames, or any walking unit
@@ -511,7 +499,7 @@ export default class Place {
     things.sort((p, q) => p.z - q.z);
 
     // immersive layout: the lands around the village (tools/bake_lands.py, terre-data.js) and a vertical camera too
-    const worldTop = imm ? -this.camV() : Math.round(((this.h ?? WORLD.h) - WORLD.h) / 2);
+    const worldTop = Math.round(-this.camV());
     const glide = this.drag ? { duration: 16, easing: "linear" } : { duration: 650, easing: "ease-in-out" };
     const band = (name, y) => [
       ...EXT.tiles.map((k) => image(`${MONDE}/${name}-${k}-jour.png`).absolute().left(k * 1000).top(y).w(1000).h(EXT[name])),
@@ -522,7 +510,7 @@ export default class Place {
     const layer = (id) => div().id(id).absolute().top(worldTop).left(-camX).w(WORLD.w).h(WORLD.h)
       .transition("left", glide).transition("top", glide);
     const world = layer("monde")
-      .when(imm, (el) => el.children(band("nord", -EXT.nord)).children(band("sud", WORLD.h)))
+      .children(band("nord", -EXT.nord)).children(band("sud", WORLD.h))
       .children(TILES.map((tl) => image(`${MONDE}/jour-${tl.k}.png`).absolute().left(tl.x).top(0).w(tl.w).h(WORLD.h)))
       .when(nightK > 0, (el) => el.children(TILES.map((tl) => image(`${MONDE}/nuit-${tl.k}.png`).absolute().left(tl.x).top(0).w(tl.w).h(WORLD.h).opacity(nightK))))
       .children(this.glows(nightK))
@@ -530,19 +518,18 @@ export default class Place {
       .children(things.map((th) => th.el))
       .children(this.smoke());
 
-    const panel = imm ? null : commandPanel(PANEL, this.minimap(units, vw), sel, { on: this.live, toggle: () => setShared("wocc.anim", !this.live) });
-
     return h_flex().id("place").size_full().bg(C.slate)
       .on_size_change((s, cx) => {
         // on_size_change reports screen px, but everything here is drawn in zoom-1 px (the app zoom scales it):
         // convert, or at zoom < 1 the world is placed too high (green strip below) and the camera overshoots
         const z = Number(settings()?.zoom) || 1, w = s.width / z, hh = s.height / z;
-        if (Math.abs(w - this.w) > 10 || Math.abs(hh - (this.h ?? 0)) > 0.5) { this.w = w; this.h = hh; cx.notify(); }
+        // a new size re-centres on the selected unit
+        GEO.size.town = { w: s.width, h: s.height };
+        if (Math.abs(w - this.w) > 10 || Math.abs(hh - (this.h ?? 0)) > 0.5) { this.w = w; this.h = hh; this.lastFocus = null; cx.notify(); }
       })
-      .when(!imm, (el) => el.child(panel))
       .child(div().id("vue").flex_1().h_full().relative().overflow_hidden().bg("#3f6b2c")
         .on_scroll_wheel((e, cx) => {
-          if (imm) { this.camX = this.cam(vw) - e.delta.x; this.camY = this.camV() - e.delta.y; }
+          if (cropped) { this.camX = this.cam(vw) - e.delta.x; this.camY = this.camV() - e.delta.y; }
           else this.camX = this.cam(vw) - (Math.abs(e.delta.x) > Math.abs(e.delta.y) ? e.delta.x : e.delta.y);
           this.manual = true;
           cx.notify();
@@ -553,16 +540,17 @@ export default class Place {
         .on_mouse_move((e, cx) => {
           if (!this.drag) return;
           const x = Math.max(0, Math.min(Math.max(0, WORLD.w - vw), this.drag.cam0 - (e.position.x - this.drag.x0)));
-          const y = imm ? this.drag.camY0 - (e.position.y - this.drag.y0) : 0;
-          if (Math.abs(x - this.cam(vw)) < 1 && (!imm || Math.abs(y - this.camV()) < 1)) return;
+          const y = this.drag.camY0 - (e.position.y - this.drag.y0);
+          if (Math.abs(x - this.cam(vw)) < 1 && (!cropped || Math.abs(y - this.camV()) < 1)) return;
           this.camX = x;
-          if (imm) this.camY = y;
+          if (cropped) this.camY = y;
           this.manual = true;
           cx.notify();
         })
         .on_mouse_up("left", (_e, cx) => { if (this.drag) { this.drag = null; cx.notify(); } })
         .on_hover((over, cx) => { if (!over && this.drag) { this.drag = null; cx.notify(); } })
         .child(world)
-        .child(this.chronicle()));
+        .child(this.chronicle())
+        .when(!imm && !props()?.demo, (el) => el.child(mover(this, "town"))));
   }
 }

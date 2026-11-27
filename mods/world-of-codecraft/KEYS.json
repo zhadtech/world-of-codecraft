@@ -9,7 +9,7 @@
     "ctrl-shift-b": {
       "command": "layout.toggle",
       "args": {
-        "id": "gauche"
+        "id": "zone-left"
       }
     },
     "ctrl-shift-i": "world-of-codecraft.mode"
